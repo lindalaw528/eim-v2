@@ -1,0 +1,16 @@
+{
+  "name": "EIM V2 — Equity Intelligence Model",
+  "short_name": "EIM V2",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#08101e",
+  "theme_color": "#08101e",
+  "icons": [
+    {
+      "src": "/static/eim-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#08101e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="EIM V2">
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/static/eim-icon.svg">
+  <title>EIM V2 — Equity Intelligence Model</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #08101e; color: #e8eef9; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .wrap { max-width: 1180px; margin: auto; padding: max(20px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 28px max(16px, env(safe-area-inset-left)); }
+    .brand { font-weight: 800; font-size: clamp(20px, 5vw, 24px); letter-spacing: -.02em; }
+    .sub, .muted { color: #9aaac3; }
+    .sub { margin-top: 4px; font-size: 14px; }
+    .search { display: flex; gap: 8px; margin: 22px 0; }
+    button, input { font: inherit; }
+    .search input { min-width: 0; flex: 1; background: #111c2f; border: 1px solid #2a3a55; border-radius: 10px; padding: 14px; color: white; font-size: 16px; }
+    .search button { appearance: none; border: 0; border-radius: 10px; padding: 0 18px; color: #07111f; background: #84b7ff; font-weight: 800; cursor: pointer; }
+    .search button:active, .results button:active { transform: scale(.99); }
+    .results, .grid { display: grid; gap: 12px; }
+    .results button { width: 100%; appearance: none; background: #111c2f; color: white; border: 1px solid #253752; border-radius: 10px; padding: 12px; text-align: left; cursor: pointer; }
+    .result-name { display: block; margin-top: 2px; }
+    .grid { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+    .card { overflow: hidden; background: #0e192a; border: 1px solid #22334d; border-radius: 14px; padding: 16px; }
+    .big { font-size: 30px; font-weight: 800; line-height: 1.2; }
+    .row { display: flex; justify-content: space-between; align-items: start; gap: 12px; padding: 9px 0; border-bottom: 1px solid #18263a; }
+    .row:last-child { border-bottom: 0; }
+    .row b { text-align: right; }
+    .pos { color: #5ee2a0; }
+    .neg { color: #ff8c9b; }
+    .status { display: inline-block; margin: 10px 0 0; padding: 5px 8px; background: #172842; border-radius: 8px; font-size: 12px; }
+    canvas { display: block; width: 100%; height: 280px; background: #0a1424; border-radius: 10px; }
+    .warn { margin-top: 20px; color: #a9b8ce; font-size: 12px; line-height: 1.5; }
+    h1, h3 { margin-top: 0; }
+    small { display: block; margin-top: 2px; }
+    @media (max-width: 520px) {
+      .wrap { padding-bottom: max(28px, env(safe-area-inset-bottom)); }
+      .search { flex-wrap: wrap; }
+      .search input { flex-basis: 100%; }
+      .search button { min-height: 46px; flex: 1; }
+      .card { padding: 14px; }
+      canvas { height: 220px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header>
+      <div class="brand">EIM V2 — Equity Intelligence Model</div>
+      <div class="sub">Real-source ticker search · Bursa Malaysia + US · Technical engine</div>
+    </header>
+
+    <form class="search" id="search-form">
+      <input id="q" aria-label="Company or ticker" autocomplete="off" placeholder="Maybank, 1155.KL, Nvidia, NVDA" required>
+      <button type="submit">Search</button>
+    </form>
+    <section id="results" class="results" aria-live="polite"></section>
+    <section id="view" aria-live="polite"></section>
+    <p class="warn">Research tool only. Prices and technical levels come from the latest available daily historical data returned by the source. Levels are model-derived, not analyst targets. Fields the source does not return are shown as <strong>Unavailable</strong>.</p>
+  </main>
+
+  <script>
+    const q = document.getElementById('q');
+    const results = document.getElementById('results');
+    const view = document.getElementById('view');
+    document.getElementById('search-form').addEventListener('submit', event => { event.preventDefault(); go(); });
+
+    function text(value) { return value == null || value === '' ? 'Unavailable' : String(value); }
+    function escapeHtml(value) {
+      return text(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[character]));
+    }
+    function fmt(value, digits = 2) {
+      const number = Number(value);
+      return Number.isFinite(number) ? number.toFixed(digits) : 'Unavailable';
+    }
+    function pct(value) {
+      const number = Number(value);
+      return Number.isFinite(number) ? `${number.toFixed(2)}%` : 'Unavailable';
+    }
+    async function getJson(url) {
+      const response = await fetch(url);
+      let payload;
+      try { payload = await response.json(); } catch { throw new Error('DATA NOT RELIABLY AVAILABLE — invalid response from the server.'); }
+      if (!response.ok || payload.error) throw new Error(payload.error || 'DATA NOT RELIABLY AVAILABLE — request failed.');
+      return payload;
+    }
+    function card(message) {
+      view.innerHTML = '';
+      const element = document.createElement('div');
+      element.className = 'card';
+      element.textContent = message;
+      view.append(element);
+    }
+    async function go() {
+      const query = q.value.trim();
+      if (!query) return;
+      results.textContent = 'Searching real market-data source…';
+      view.innerHTML = '';
+      try {
+        const data = await getJson(`/api/search?q=${encodeURIComponent(query)}`);
+        results.innerHTML = '';
+        if (!data.length) { results.textContent = 'No matching equity found.'; return; }
+        data.forEach(item => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          const symbol = document.createElement('strong');
+          symbol.textContent = item.symbol;
+          const name = document.createElement('span');
+          name.className = 'result-name';
+          name.textContent = item.name;
+          const exchange = document.createElement('span');
+          exchange.className = 'muted';
+          exchange.textContent = item.exchange || 'Exchange unavailable';
+          button.append(symbol, name, exchange);
+          button.addEventListener('click', () => loadStock(item.symbol));
+          results.append(button);
+        });
+      } catch (error) {
+        results.textContent = error.message;
+      }
+    }
+    function metricRow(label, value) {
+      return `<div class="row"><span>${label}</span><b>${fmt(value)}</b></div>`;
+    }
+    function levelRows(levels, prefix) {
+      if (!levels || !levels.length) return '<div class="muted">Unavailable — no nearby evidence-based pivot returned.</div>';
+      return levels.map((level, index) => `<div class="row"><span>${prefix}${index + 1}<small class="muted">${escapeHtml(level.basis)}</small></span><b>${fmt(level.price)}</b></div>`).join('');
+    }
+    async function loadStock(symbol) {
+      results.innerHTML = '';
+      card(`Loading ${symbol} from real historical-price data…`);
+      try {
+        const data = await getJson(`/api/stock/${encodeURIComponent(symbol)}`);
+        const technical = data.technical || {};
+        const changeClass = Number(data.changePct) >= 0 ? 'pos' : 'neg';
+        view.innerHTML = `
+          <article class="card">
+            <div class="muted">${escapeHtml(data.exchange)} · ${escapeHtml(data.currency)}</div>
+            <h1>${escapeHtml(data.name)} <span class="muted">${escapeHtml(data.symbol)}</span></h1>
+            <div class="big">${fmt(data.price)} <span class="${changeClass}" style="font-size:16px">${pct(data.changePct)}</span></div>
+            <div class="status">Latest daily close: ${escapeHtml(data.lastTradingDate)}</div>
+            <div class="muted" style="margin-top:8px">Market status: ${escapeHtml(data.marketState)} · Response generated: ${escapeHtml(data.responseGeneratedAt)}</div>
+          </article><br>
+          <div class="grid">
+            <article class="card"><h3>Technical structure</h3>
+              ${metricRow('20MA', technical.sma20)}
+              ${metricRow('50MA', technical.sma50)}
+              ${metricRow('200MA', technical.sma200)}
+              ${metricRow('RSI (14)', technical.rsi14)}
+              ${metricRow('MACD', technical.macd)}
+              ${metricRow('52W High', technical.high52)}
+              ${metricRow('52W Low', technical.low52)}
+            </article>
+            <article class="card"><h3>Support</h3>${levelRows(technical.support, 'S')}</article>
+            <article class="card"><h3>Resistance</h3>${levelRows(technical.resistance, 'R')}</article>
+          </div><br>
+          <article class="card"><h3>1-year price chart</h3><canvas id="chart" width="1050" height="280" aria-label="One-year daily close chart"></canvas><div class="muted" style="margin-top:8px">Daily closes. Technical levels are calculated locally from returned price history.</div></article>`;
+        draw(data.history || []);
+      } catch (error) {
+        card(error.message);
+      }
+    }
+    function draw(history) {
+      const canvas = document.getElementById('chart');
+      const values = history.slice(-252).map(row => Number(row.close)).filter(Number.isFinite);
+      if (!canvas || values.length < 2) return;
+      const context = canvas.getContext('2d');
+      const minimum = Math.min(...values);
+      const maximum = Math.max(...values);
+      const spread = maximum - minimum || 1;
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.strokeStyle = '#70a7ff';
+      context.lineWidth = 2;
+      context.beginPath();
+      values.forEach((value, index) => {
+        const x = index / (values.length - 1) * (canvas.width - 20) + 10;
+        const y = canvas.height - 10 - (value - minimum) / spread * (canvas.height - 20);
+        index ? context.lineTo(x, y) : context.moveTo(x, y);
+      });
+      context.stroke();
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" role="img" aria-labelledby="title">
+  <title>EIM V2</title>
+  <rect width="180" height="180" rx="38" fill="#08101e"/>
+  <path d="M35 126V52h15v61h95v13H35Zm28-23 20-25 20 14 37-43 10 9-46 54-20-14-19 24-12-19Z" fill="#84b7ff"/>
+  <text x="90" y="155" text-anchor="middle" fill="#e8eef9" font-family="Arial, sans-serif" font-size="28" font-weight="700">EIM</text>
+</svg>
